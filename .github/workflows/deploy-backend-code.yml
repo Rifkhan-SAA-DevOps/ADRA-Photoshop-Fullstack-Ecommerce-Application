@@ -6,10 +6,8 @@ on:
       - main
     paths:
       - "server/src/**"
-      - "server/package.json"
-      - "server/package-lock.json"
       - ".github/workflows/deploy-backend-code.yml"
-  workflow_dispatch:
+#   workflow_dispatch:
 
 permissions:
   id-token: write
