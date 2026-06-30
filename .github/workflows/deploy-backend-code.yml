@@ -7,7 +7,7 @@ on:
     paths:
       - "server/src/**"
       - ".github/workflows/deploy-backend-code.yml"
-#   workflow_dispatch:
+
 
 permissions:
   id-token: write
