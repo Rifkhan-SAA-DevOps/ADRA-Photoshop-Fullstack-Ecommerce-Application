@@ -1,0 +1,156 @@
+name: Deploy ADRA
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      backend_code: ${{ steps.filter.outputs.backend_code }}
+      backend_layer: ${{ steps.filter.outputs.backend_layer }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check changed files
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            frontend:
+              - 'client/**'
+            backend_code:
+              - 'server/src/**'
+            backend_layer:
+              - 'server/package.json'
+              - 'server/package-lock.json'
+
+  deploy-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials for frontend
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_FRONTEND_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+
+      - name: Deploy frontend to S3
+        run: aws s3 sync dist/ s3://${{ vars.FRONTEND_BUCKET }} --delete
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+  deploy-backend-layer:
+    needs: changes
+    if: needs.changes.outputs.backend_layer == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials for backend
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_BACKEND_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Build Lambda layer
+        run: |
+          mkdir -p lambda-layer/nodejs
+          cp server/package.json lambda-layer/nodejs/
+          cp server/package-lock.json lambda-layer/nodejs/
+          cd lambda-layer/nodejs
+          npm ci --omit=dev
+          cd ../..
+          cd lambda-layer
+          zip -r ../adra-nodejs-layer.zip nodejs
+
+      - name: Publish new Lambda layer version
+        id: publish_layer
+        run: |
+          LAYER_VERSION_ARN=$(aws lambda publish-layer-version \
+            --layer-name ${{ vars.LAMBDA_LAYER_NAME }} \
+            --zip-file fileb://adra-nodejs-layer.zip \
+            --compatible-runtimes nodejs22.x nodejs20.x \
+            --compatible-architectures x86_64 \
+            --query 'LayerVersionArn' \
+            --output text)
+
+          echo "layer_version_arn=$LAYER_VERSION_ARN" >> $GITHUB_OUTPUT
+
+      - name: Attach new layer version to Lambda
+        run: |
+          aws lambda update-function-configuration \
+            --function-name ${{ vars.LAMBDA_FUNCTION_NAME }} \
+            --layers ${{ steps.publish_layer.outputs.layer_version_arn }}
+
+  deploy-backend-code:
+    needs:
+      - changes
+      - deploy-backend-layer
+    if: |
+      always() &&
+      needs.changes.outputs.backend_code == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials for backend
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_BACKEND_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Create backend code zip
+        run: |
+          cd server
+          zip -r ../adra-backend-code.zip src package.json package-lock.json
+
+      - name: Upload backend code to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ vars.LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://adra-backend-code.zip
