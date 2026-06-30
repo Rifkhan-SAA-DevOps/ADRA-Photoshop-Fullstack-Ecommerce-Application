@@ -38,7 +38,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-    environment: production
+    # environment: production
 
     defaults:
       run:
