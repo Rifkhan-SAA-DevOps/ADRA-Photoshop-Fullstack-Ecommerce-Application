@@ -82,7 +82,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend_layer == 'true'
     runs-on: ubuntu-latest
-    environment: production
+    # environment: production
 
     steps:
       - name: Checkout repository
@@ -132,7 +132,7 @@ jobs:
       always() &&
       needs.changes.outputs.backend_code == 'true'
     runs-on: ubuntu-latest
-    environment: production
+    # environment: production
 
     steps:
       - name: Checkout repository
