@@ -6,3 +6,4 @@ app.listen(port, () => {
   console.log(`Photography Shop API running on http://localhost:${port}`);
 });
 
+console.log('test');
