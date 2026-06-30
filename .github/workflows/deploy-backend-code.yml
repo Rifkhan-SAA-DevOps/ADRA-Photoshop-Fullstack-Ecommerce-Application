@@ -1,0 +1,42 @@
+name: Deploy Backend Code to Lambda
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "server/src/**"
+      - "server/package.json"
+      - "server/package-lock.json"
+      - ".github/workflows/deploy-backend-code.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-backend-code:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_BACKEND_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Create backend code zip
+        run: |
+          cd server
+          zip -r ../adra-backend-code.zip src package.json package-lock.json
+
+      - name: Upload backend code to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ vars.LAMBDA_FUNCTION_NAME }} \
+            --zip-file fileb://adra-backend-code.zip
