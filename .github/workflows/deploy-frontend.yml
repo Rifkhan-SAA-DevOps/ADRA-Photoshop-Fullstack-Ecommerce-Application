@@ -7,6 +7,7 @@ on:
     paths:
       - "client/**"
       - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
 
 
 permissions:
@@ -16,7 +17,7 @@ permissions:
 jobs:
   deploy-frontend:
     runs-on: ubuntu-latest
-    environment: production
+    # environment: production
 
     defaults:
       run:
