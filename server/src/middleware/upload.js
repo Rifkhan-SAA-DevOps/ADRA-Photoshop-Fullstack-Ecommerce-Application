@@ -1,5 +1,4 @@
 import multer from "multer";
-import sharp from "sharp";
 import { randomUUID } from "crypto";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 
@@ -21,24 +20,61 @@ export const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024,
+    fileSize: 2 * 1024 * 1024,
+    files: 8,
   },
 });
 
-async function optimizeImage(file) {
-  return sharp(file.buffer)
-    .rotate()
-    .resize({
-      width: 1600,
-      height: 1600,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .webp({
-      quality: 78,
-      effort: 5,
-    })
-    .toBuffer();
+function makeSafeBuffer(input) {
+  if (!input) {
+    throw new Error("Image buffer is missing.");
+  }
+
+  if (Buffer.isBuffer(input)) {
+    return Buffer.from(Uint8Array.from(input));
+  }
+
+  if (ArrayBuffer.isView(input)) {
+    const view = new Uint8Array(
+      input.buffer,
+      input.byteOffset,
+      input.byteLength,
+    );
+
+    return Buffer.from(Uint8Array.from(view));
+  }
+
+  if (
+    input instanceof ArrayBuffer ||
+    Object.prototype.toString.call(input) === "[object SharedArrayBuffer]"
+  ) {
+    return Buffer.from(Uint8Array.from(new Uint8Array(input)));
+  }
+
+  throw new Error(
+    `Unsupported image buffer type: ${Object.prototype.toString.call(input)}`,
+  );
+}
+
+function getExtensionAndContentType(file) {
+  if (file.mimetype === "image/png") {
+    return {
+      extension: "png",
+      contentType: "image/png",
+    };
+  }
+
+  if (file.mimetype === "image/jpeg") {
+    return {
+      extension: "jpg",
+      contentType: "image/jpeg",
+    };
+  }
+
+  return {
+    extension: "webp",
+    contentType: "image/webp",
+  };
 }
 
 export async function fileUrl(_req, file) {
@@ -50,17 +86,19 @@ export async function fileUrl(_req, file) {
     throw new Error("Image file is required.");
   }
 
-  const optimizedBuffer = await optimizeImage(file);
+  const { extension, contentType } = getExtensionAndContentType(file);
+  const safeBody = makeSafeBuffer(file.buffer);
 
   const folder = new Date().toISOString().slice(0, 10);
-  const key = `uploads/${folder}/${randomUUID()}.webp`;
+  const key = `uploads/${folder}/${randomUUID()}.${extension}`;
 
   await s3Client.send(
     new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: key,
-      Body: optimizedBuffer,
-      ContentType: "image/webp",
+      Body: safeBody,
+      ContentType: contentType,
+      ContentLength: safeBody.length,
       CacheControl: "public, max-age=31536000, immutable",
     }),
   );
