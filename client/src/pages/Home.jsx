@@ -116,18 +116,20 @@ function buildHeroImageSets(images = []) {
     return fallbackHeroImageSets;
   }
 
-  const fallbackFlatImages = fallbackHeroImageSets.flat();
-
   const sets = [];
 
   for (let i = 0; i < cleanImages.length; i += HERO_IMAGES_PER_SET) {
     const set = cleanImages.slice(i, i + HERO_IMAGES_PER_SET);
 
-    let fallbackIndex = 0;
+    let repeatIndex = 0;
 
+    // Important optimization:
+    // If admin hero images exist, do not fill missing grid slots with old static PNG fallback images.
+    // Reuse uploaded DB/S3 images instead. This prevents unnecessary requests like wedding_couples.png,
+    // Portrait.png, camera_work.png after admin hero images are already available.
     while (set.length < HERO_IMAGES_PER_SET) {
-      set.push(fallbackFlatImages[fallbackIndex % fallbackFlatImages.length]);
-      fallbackIndex += 1;
+      set.push(cleanImages[repeatIndex % cleanImages.length]);
+      repeatIndex += 1;
     }
 
     sets.push(set);
@@ -136,7 +138,7 @@ function buildHeroImageSets(images = []) {
   return sets.length ? sets : fallbackHeroImageSets;
 }
 
-const headingText = "Capture your moments with a modern creative studio.";
+const headingText = "Imagine Anything We can Transform it..";
 
 function TypewriterHeading() {
   const [typedText, setTypedText] = useState("");
@@ -215,6 +217,8 @@ function FlipMomentCard({ item, index }) {
           <img
             src={item.front}
             alt={item.title}
+            loading="lazy"
+            decoding="async"
             className="h-full w-full object-cover transition duration-700 group-hover:scale-110"
           />
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent p-6">
@@ -228,6 +232,8 @@ function FlipMomentCard({ item, index }) {
           <img
             src={item.back}
             alt={`${item.title} after`}
+            loading="lazy"
+            decoding="async"
             className="absolute inset-0 h-full w-full object-cover opacity-30"
           />
           <div className="relative flex h-full flex-col justify-end">
@@ -305,8 +311,24 @@ function HeroImageGrid({ imageSetIndex, imageSets }) {
       },
     };
   };
-  const currentImageSet =
-    imageSets?.[imageSetIndex] || imageSets?.[0] || fallbackHeroImageSets[0];
+  const currentImageSet = imageSets?.[imageSetIndex] || imageSets?.[0] || [];
+
+  if (!currentImageSet.length) {
+    return (
+      <div className="grid grid-cols-2 gap-4" aria-label="Loading hero images">
+        {sizeClasses.map((sizeClass, index) => (
+          <div
+            key={`hero-skeleton-${index}`}
+            className={`${sizeClass} relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.06]`}
+          >
+            <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-white/10 via-white/[0.03] to-pink-500/10" />
+            <div className="absolute -bottom-10 left-1/2 h-24 w-24 -translate-x-1/2 rounded-full bg-pink-400/20 blur-2xl" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-2 gap-4">
       {currentImageSet.map((image, index) => {
@@ -338,7 +360,8 @@ function HeroImageGrid({ imageSetIndex, imageSets }) {
                 <img
                   src={image.src}
                   alt={image.alt}
-                  loading="eager"
+                  loading={index === 0 ? "eager" : "lazy"}
+                  fetchpriority={index === 0 ? "high" : "auto"}
                   decoding="async"
                   className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
                 />
@@ -365,6 +388,8 @@ function ServiceMotionCard({ service }) {
         <img
           src={service.cover_image}
           alt={service.title}
+          loading="lazy"
+          decoding="async"
           className="h-full w-full object-cover transition duration-700 group-hover/card:scale-110"
         />
       </div>
@@ -458,6 +483,8 @@ function ProductShowcase({ products }) {
             <img
               src={featured.cover_image}
               alt={featured.name}
+              loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover transition duration-700 group-hover:scale-110"
             />
 
@@ -524,6 +551,8 @@ function ProductShowcase({ products }) {
               <img
                 src={product.cover_image}
                 alt={product.name}
+                loading="lazy"
+                decoding="async"
                 className="h-24 w-24 rounded-[1.2rem] object-cover transition group-hover:scale-105"
               />
 
@@ -592,6 +621,8 @@ function EventMotionCard({ event, now }) {
         <img
           src={event.cover_image}
           alt={event.title}
+          loading="lazy"
+          decoding="async"
           className={`h-full w-full object-cover transition duration-700 ${
             canViewEvent ? "group-hover/card:scale-110" : "grayscale"
           }`}
@@ -769,7 +800,7 @@ function UpcomingEventHeroCard({ event, countdown, displayDate }) {
     setActiveImageIndex(0);
     setSlideDirection(1);
     setImageRatios({});
-  }, [event?.id, event?.slug]);
+  }, [event?.id, event?.slug, safeImages.length]);
 
   useEffect(() => {
     if (safeImages.length <= 1) return undefined;
@@ -807,6 +838,8 @@ function UpcomingEventHeroCard({ event, countdown, displayDate }) {
               transition={{ duration: 0.65, ease: [0.25, 1, 0.35, 1] }}
               src={activeImage?.src}
               alt={activeImage?.alt || event.title}
+              loading="lazy"
+              decoding="async"
               onLoad={(event) => {
                 const image = event.currentTarget;
                 const ratio =
@@ -938,6 +971,7 @@ function UpcomingEventsSection({ events }) {
   }, [sortedEvents, now]);
 
   const futureEvent = futureEvents[0];
+  const visibleFutureEvent = futureEvent;
 
   const countdown = futureEvent
     ? getTimeLeft(futureEvent.event_date, now)
@@ -1005,8 +1039,8 @@ function UpcomingEventsSection({ events }) {
 
   if (!sortedEvents.length) return null;
 
-  const displayDate = futureEvent
-    ? new Date(String(futureEvent.event_date).replace(" ", "T"))
+  const displayDate = visibleFutureEvent
+    ? new Date(String(visibleFutureEvent.event_date).replace(" ", "T"))
     : null;
 
   return (
@@ -1022,9 +1056,9 @@ function UpcomingEventsSection({ events }) {
           <p className="mt-4 max-w-2xl text-white/55">{sectionDescription}</p>
         </div>
 
-        {futureEvent && (
+        {visibleFutureEvent && (
           <UpcomingEventHeroCard
-            event={futureEvent}
+            event={visibleFutureEvent}
             countdown={countdown}
             displayDate={displayDate}
           />
@@ -1058,7 +1092,7 @@ export default function Home() {
   const [products, setProducts] = useState(fallbackProducts);
   const [events, setEvents] = useState(fallbackEvents);
   const [heroSetIndex, setHeroSetIndex] = useState(0);
-  const [heroImageSets, setHeroImageSets] = useState(fallbackHeroImageSets);
+  const [heroImageSets, setHeroImageSets] = useState([]);
   useEffect(() => {
     Promise.allSettled([
       api.get("/services"),
@@ -1066,24 +1100,46 @@ export default function Home() {
       api.get("/events"),
       api.get("/hero-image-grid"),
     ]).then((results) => {
-
-      
       if (results[0].status === "fulfilled") setServices(results[0].value.data);
       if (results[1].status === "fulfilled") setProducts(results[1].value.data);
       if (results[2].status === "fulfilled") setEvents(results[2].value.data);
       if (results[3].status === "fulfilled") {
         setHeroImageSets(buildHeroImageSets(results[3].value.data));
+      } else {
+        setHeroImageSets(fallbackHeroImageSets);
       }
     });
   }, []);
-  
 
   useEffect(() => {
-    heroImageSets.flat().forEach((image) => {
-      const preloadImage = new Image();
-      preloadImage.src = image.src;
-    });
-  }, [heroImageSets]);
+    if (!heroImageSets.length) return undefined;
+
+    const currentSet = heroImageSets[heroSetIndex] || [];
+    const nextSet =
+      heroImageSets[(heroSetIndex + 1) % heroImageSets.length] || [];
+
+    const preloadUrls = Array.from(
+      new Set(
+        [...currentSet, ...nextSet].map((image) => image?.src).filter(Boolean),
+      ),
+    );
+
+    const preloadImages = () => {
+      preloadUrls.forEach((src) => {
+        const preloadImage = new Image();
+        preloadImage.decoding = "async";
+        preloadImage.src = src;
+      });
+    };
+
+    if ("requestIdleCallback" in window) {
+      const idleId = window.requestIdleCallback(preloadImages);
+      return () => window.cancelIdleCallback(idleId);
+    }
+
+    const timeoutId = window.setTimeout(preloadImages, 350);
+    return () => window.clearTimeout(timeoutId);
+  }, [heroImageSets, heroSetIndex]);
 
   useEffect(() => {
     if (heroImageSets.length <= 1) return undefined;
@@ -1193,7 +1249,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* events */}
       <UpcomingEventsSection events={events} />
 
       {/* services */}
@@ -1201,15 +1256,15 @@ export default function Home() {
         <div className="container-max">
           <div className="mb-10 flex flex-col justify-between gap-5 md:flex-row md:items-end">
             <div>
-              <p className="mb-3 text-sm font-bold uppercase tracking-[0.3em] text-pink-300">
+              {/* <p className="mb-3 text-sm font-bold uppercase tracking-[0.3em] text-pink-300">
                 Services
-              </p>
-              <h2 className="text-4xl font-black">Animated moving services</h2>
-              <p className="mt-4 max-w-2xl text-white/55">
+              </p> */}
+              <h2 className="text-4xl font-black">Services</h2>
+              {/* <p className="mt-4 max-w-2xl text-white/55">
                 The cards move from right to left, remain horizontally
                 scrollable, and each card opens its detail page with a smooth
                 hover transition.
-              </p>
+              </p> */}
             </div>
             <Link to="/services" className="btn-secondary">
               View all services
@@ -1234,17 +1289,17 @@ export default function Home() {
         <div className="container-max">
           <div className="mb-10 flex flex-col justify-between gap-5 md:flex-row md:items-end">
             <div>
-              <p className="mb-3 text-sm font-bold uppercase tracking-[0.3em] text-violet-300">
+              {/* <p className="mb-3 text-sm font-bold uppercase tracking-[0.3em] text-violet-300">
                 Products
-              </p>
+              </p> */}
               <h2 className="text-4xl font-black">
-                Interactive product showcase
+              Products
               </h2>
-              <p className="mt-4 max-w-2xl text-white/55">
+              {/* <p className="mt-4 max-w-2xl text-white/55">
                 Instead of a normal grid, products appear as a premium product
                 shelf. Click any product pack to preview it in the large
                 spotlight.
-              </p>
+              </p> */}
             </div>
             <Link to="/products" className="btn-secondary">
               View products

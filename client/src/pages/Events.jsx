@@ -136,7 +136,7 @@ export default function Events() {
   return (
     <>
       <PageHero
-        title="Upcoming Events"
+        title="Events"
         subtitle="Promote special photography packages for university convocation, school functions, parties, and public events."
       />
 

@@ -147,7 +147,7 @@ export default function Gallery() {
     <>
       <PageHero
         title="Gallery"
-        subtitle="A creative gallery section for studio, event, wedding, portrait, and convocation photography."
+        subtitle="gallery section for studio, event, wedding, portrait, and convocation photography."
       />
 
       <section className="section-padding py-16">
