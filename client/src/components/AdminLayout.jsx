@@ -14,6 +14,7 @@ const links = [
   ['Product Orders', '/admin/orders'],
   ['Contacts', '/admin/contacts'],
   ['Reviews', '/admin/reviews'],
+  ['Hero Image Grid', '/admin/hero-image-grid'],
   ['Profile', '/admin/profile'],
   ['Settings', '/admin/settings']
 ];

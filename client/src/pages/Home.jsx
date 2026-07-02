@@ -892,6 +892,10 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [heroImageSets.length]);
 
+  useEffect(() => {
+    setHeroSetIndex(0);
+  }, [heroImageSets.length]);
+
   const serviceRailItems = useMemo(() => {
     const list = services.length ? services : fallbackServices;
     return [...list, ...list];
@@ -965,7 +969,7 @@ export default function Home() {
               <Clock className="text-violet-300" />
               <p className="mt-2 text-sm font-bold">Fast Booking</p>
             </div>
-            <HeroImageGrid imageSetIndex={heroSetIndex} />
+            <HeroImageGrid imageSetIndex={heroSetIndex} imageSets={heroImageSets} />
           </motion.div>
         </div>
       </section>

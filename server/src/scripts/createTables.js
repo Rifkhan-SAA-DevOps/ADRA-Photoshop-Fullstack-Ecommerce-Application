@@ -357,6 +357,14 @@ async function main() {
   });
 
   await createTable({
+  TableName: TABLES.heroImageGrid,
+  AttributeDefinitions: [
+    { AttributeName: "id", AttributeType: "S" },
+  ],
+  KeySchema: [{ AttributeName: "id", KeyType: "HASH" }],
+});
+
+  await createTable({
     TableName: TABLES.settings,
     AttributeDefinitions: [{ AttributeName: "id", AttributeType: "S" }],
     KeySchema: [{ AttributeName: "id", KeyType: "HASH" }],

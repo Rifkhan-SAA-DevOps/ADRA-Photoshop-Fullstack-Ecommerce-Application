@@ -19,6 +19,7 @@ import ProductOrdersPage from "./pages/admin/ProductOrdersPage.jsx";
 import RequestsPage from "./pages/admin/RequestsPage.jsx";
 import ReviewsPage from "./pages/admin/ReviewsPage.jsx";
 import SettingsPage from "./pages/admin/SettingsPage.jsx";
+import ManageHeroImageGrid from "./pages/admin/ManageHeroImageGrid.jsx";
 import CustomersPage from "./pages/admin/CustomersPage.jsx";
 import AdminUsersPage from "./pages/admin/AdminUsersPage.jsx";
 import ProfilePage from "./pages/admin/ProfilePage.jsx";
@@ -159,6 +160,7 @@ export default function App() {
         <Route path="contacts" element={<ContactRequestsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="hero-image-grid" element={<ManageHeroImageGrid />} />
 
         {/* Review admin */}
         <Route path="reviews" element={<AdminReviewsPage />} />
