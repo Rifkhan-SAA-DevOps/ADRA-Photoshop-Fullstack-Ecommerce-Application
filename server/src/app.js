@@ -15,7 +15,7 @@ import uploadRoutes from './routes/upload.js';
 import dashboardRoutes from './routes/dashboard.js';
 import settingsRoutes from './routes/settings.js';
 import adminRoutes from './routes/adminRoutes.js';
-const heroImageGridRoutes = require("./routes/heroImageGrid");
+import heroImageGridRoutes from "./routes/heroImageGrid";
 dotenv.config();
 
 const app = express();
