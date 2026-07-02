@@ -108,9 +108,9 @@ export default function Header() {
       <div className="container-max section-padding flex h-20 items-center justify-between">
         {/* Logo */}
         <Link to="/" className="flex items-center">
-          <span className="flex h-12 w-28 items-center justify-center overflow-hidden rounded border border-white/10 bg-transparent shadow-glow">
+          <span className="flex h-12 w-30 items-center justify-center overflow-hidden rounded  bg-transparent shadow-glow">
             <img
-              src="/header_logo.jpeg"
+              src="/header_logo.png"
               alt="ADRA Photography Logo"
               className="h-full w-full scale-110 object-cover"
             />

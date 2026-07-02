@@ -44,6 +44,7 @@ export const TABLES = {
   productImages: `${prefix}_product_images`,
   eventImages: `${prefix}_event_images`,
   reviewImages: `${prefix}_review_images`,
+  heroImageGrid: `${prefix}_hero_image_grid`,
 
 };
 

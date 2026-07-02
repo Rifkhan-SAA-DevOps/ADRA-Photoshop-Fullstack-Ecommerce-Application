@@ -10,7 +10,12 @@ import {
   getStoredCategories,
   saveStoredCategories,
 } from "./productCategories.jsx";
-
+import {
+  compressImagesForUpload,
+  formatFileSize,
+  getTotalUploadSize,
+  getUploadFilesFromImages,
+} from "../../lib/imageCompression.js";
 const emptyProduct = {
   name: "",
   category: "",
@@ -110,37 +115,71 @@ export default function ProductForm() {
     setNewCategory("");
   }
 
-  async function saveProduct(event) {
-    event.preventDefault();
-    setMessage("");
-    setIsSaving(true);
+ async function saveProduct(event) {
+  event.preventDefault();
+  setMessage("");
+  setIsSaving(true);
 
-    try {
-      const formData = new FormData();
+  try {
+    const newUploadFiles = getUploadFilesFromImages(images);
 
-      formData.append("name", form.name);
-      formData.append("category", form.category || "");
-      formData.append("description", form.description || "");
-      formData.append("price", form.price || 0);
-      formData.append("status", form.status || "active");
-
-      appendImagesToFormData(formData, images, coverImage);
-
-      if (isEdit) {
-        await api.put(`/products/${id}`, formData);
-        setMessage("Product updated successfully.");
-      } else {
-        await api.post("/products", formData);
-        setMessage("Product created successfully.");
-      }
-
-      navigate("/admin/products");
-    } catch (error) {
-      setMessage(error.response?.data?.message || "Save failed.");
-    } finally {
+    if (newUploadFiles.length > 8) {
+      setMessage("Please upload maximum 8 product images at once.");
       setIsSaving(false);
+      return;
     }
+
+    const compressedImages = await compressImagesForUpload(images, {
+      targetBytes: 350 * 1024, // around 350 KB
+      maxBytes: 650 * 1024, // maximum around 650 KB
+      maxWidth: 1400,
+      maxHeight: 1400,
+      startQuality: 0.78,
+      minQuality: 0.45,
+    });
+
+    const totalUploadSize = getTotalUploadSize(compressedImages);
+
+    if (totalUploadSize > 5 * 1024 * 1024) {
+      setMessage(
+        `Images are still too large after compression. Current size: ${formatFileSize(
+          totalUploadSize,
+        )}. Please upload fewer images.`,
+      );
+      setIsSaving(false);
+      return;
+    }
+
+    const compressedCoverImage = coverImage
+      ? compressedImages.find((image) => image.id === coverImage.id) ||
+        coverImage
+      : null;
+
+    const formData = new FormData();
+
+    formData.append("name", form.name);
+    formData.append("category", form.category || "");
+    formData.append("description", form.description || "");
+    formData.append("price", form.price || 0);
+    formData.append("status", form.status || "active");
+
+    appendImagesToFormData(formData, compressedImages, compressedCoverImage);
+
+    if (isEdit) {
+      await api.put(`/products/${id}`, formData);
+      setMessage("Product updated successfully.");
+    } else {
+      await api.post("/products", formData);
+      setMessage("Product created successfully.");
+    }
+
+    navigate("/admin/products");
+  } catch (error) {
+    setMessage(error.response?.data?.message || error.message || "Save failed.");
+  } finally {
+    setIsSaving(false);
   }
+}
 
   return (
     <div className="space-y-8">

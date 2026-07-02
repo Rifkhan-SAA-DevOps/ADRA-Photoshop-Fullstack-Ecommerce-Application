@@ -40,7 +40,7 @@ import videography from "./../docs/images/videography.png";
 import wall_frame from "./../docs/images/wall_frame.png";
 import website from "./../docs/images/wesite.png";
 
-const heroImageSets = [
+const fallbackHeroImageSets = [
   [
     {
       src: wedding_couples,
@@ -96,6 +96,43 @@ const heroImageSets = [
     },
   ],
 ];
+
+const HERO_IMAGES_PER_SET = 4;
+
+function buildHeroImageSets(images = []) {
+  const cleanImages = Array.isArray(images)
+    ? images
+        .filter((image) => image?.image_url)
+        .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))
+        .map((image) => ({
+          src: image.image_url,
+          alt: image.alt || "ADRA photography hero image",
+        }))
+    : [];
+
+  if (!cleanImages.length) {
+    return fallbackHeroImageSets;
+  }
+
+  const fallbackFlatImages = fallbackHeroImageSets.flat();
+
+  const sets = [];
+
+  for (let i = 0; i < cleanImages.length; i += HERO_IMAGES_PER_SET) {
+    const set = cleanImages.slice(i, i + HERO_IMAGES_PER_SET);
+
+    let fallbackIndex = 0;
+
+    while (set.length < HERO_IMAGES_PER_SET) {
+      set.push(fallbackFlatImages[fallbackIndex % fallbackFlatImages.length]);
+      fallbackIndex += 1;
+    }
+
+    sets.push(set);
+  }
+
+  return sets.length ? sets : fallbackHeroImageSets;
+}
 
 const headingText = "Capture your moments with a modern creative studio.";
 
@@ -204,7 +241,7 @@ function FlipMomentCard({ item, index }) {
   );
 }
 
-function HeroImageGrid({ imageSetIndex }) {
+function HeroImageGrid({ imageSetIndex, imageSets }) {
   const sizeClasses = ["h-72", "mt-16 h-72", "h-60", "h-60"];
 
   const hoverClasses = [
@@ -266,10 +303,11 @@ function HeroImageGrid({ imageSetIndex }) {
       },
     };
   };
-
+  const currentImageSet =
+    imageSets?.[imageSetIndex] || imageSets?.[0] || fallbackHeroImageSets[0];
   return (
     <div className="grid grid-cols-2 gap-4">
-      {heroImageSets[imageSetIndex].map((image, index) => {
+      {currentImageSet.map((image, index) => {
         const cardMotion = getCardRoute(index);
 
         return (
@@ -820,16 +858,20 @@ export default function Home() {
   const [products, setProducts] = useState(fallbackProducts);
   const [events, setEvents] = useState(fallbackEvents);
   const [heroSetIndex, setHeroSetIndex] = useState(0);
-
+  const [heroImageSets, setHeroImageSets] = useState(fallbackHeroImageSets);
   useEffect(() => {
     Promise.allSettled([
       api.get("/services"),
       api.get("/products"),
       api.get("/events"),
+      api.get("/hero-image-grid"),
     ]).then((results) => {
       if (results[0].status === "fulfilled") setServices(results[0].value.data);
       if (results[1].status === "fulfilled") setProducts(results[1].value.data);
       if (results[2].status === "fulfilled") setEvents(results[2].value.data);
+      if (results[3].status === "fulfilled") {
+        setHeroImageSets(buildHeroImageSets(results[3].value.data));
+      }
     });
   }, []);
 
@@ -838,15 +880,17 @@ export default function Home() {
       const preloadImage = new Image();
       preloadImage.src = image.src;
     });
-  }, []);
+  }, [heroImageSets]);
 
   useEffect(() => {
+    if (heroImageSets.length <= 1) return undefined;
+
     const timer = setInterval(() => {
       setHeroSetIndex((current) => (current + 1) % heroImageSets.length);
     }, 5200);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [heroImageSets.length]);
 
   const serviceRailItems = useMemo(() => {
     const list = services.length ? services : fallbackServices;

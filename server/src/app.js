@@ -15,7 +15,7 @@ import uploadRoutes from './routes/upload.js';
 import dashboardRoutes from './routes/dashboard.js';
 import settingsRoutes from './routes/settings.js';
 import adminRoutes from './routes/adminRoutes.js';
-
+const heroImageGridRoutes = require("./routes/heroImageGrid");
 dotenv.config();
 
 const app = express();
@@ -99,6 +99,33 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/admins', adminRoutes);
+app.use("/api/hero-image-grid", heroImageGridRoutes);
+
+
+app.use((err, req, res, next) => {
+  if (err.code === "LIMIT_FILE_SIZE") {
+    return res.status(413).json({
+      message: "Image is too large. Please upload compressed images below 2 MB.",
+    });
+  }
+
+  if (err.code === "LIMIT_FILE_COUNT") {
+    return res.status(413).json({
+      message: "Too many images. Please upload maximum 8 images at once.",
+    });
+  }
+
+  if (err.message?.includes("Only JPG")) {
+    return res.status(400).json({
+      message: err.message,
+    });
+  }
+
+  return res.status(err.status || 500).json({
+    message: err.message || "Server error.",
+  });
+});
+
 
 app.use((req, res) => {
   res.status(404).json({
