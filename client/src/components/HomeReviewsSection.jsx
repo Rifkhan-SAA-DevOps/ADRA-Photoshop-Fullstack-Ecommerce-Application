@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Expand,
   ImagePlus,
   Star,
   X,
@@ -33,6 +34,56 @@ function shortText(text = "", max = 90) {
   return `${clean.slice(0, max)}...`;
 }
 
+function getReviewImageList(review) {
+  const imageMap = new Map();
+
+  function addImage(imageUrl, caption = "") {
+    const cleanUrl = String(imageUrl || "").trim();
+
+    if (!cleanUrl || imageMap.has(cleanUrl)) return;
+
+    imageMap.set(cleanUrl, {
+      image_url: cleanUrl,
+      caption: String(caption || "").trim(),
+    });
+  }
+
+  if (Array.isArray(review?.images)) {
+    review.images.forEach((image) => {
+      if (typeof image === "string") {
+        addImage(image);
+        return;
+      }
+
+      addImage(image?.image_url || image?.url, image?.caption || image?.alt);
+    });
+  }
+
+  return [...imageMap.values()];
+}
+
+function getImageShape(width, height) {
+  if (!width || !height) return "landscape";
+
+  const ratio = width / height;
+
+  if (ratio < 0.78) return "portrait";
+  if (ratio > 1.22) return "landscape";
+  return "square";
+}
+
+function getReviewFrameClass(imageShape) {
+  if (imageShape === "portrait") {
+    return "mx-auto h-[520px] max-w-[360px] sm:h-[620px]";
+  }
+
+  if (imageShape === "square") {
+    return "mx-auto h-[360px] max-w-[520px] sm:h-[500px]";
+  }
+
+  return "h-[230px] sm:h-[320px] md:h-[420px]";
+}
+
 export default function HomeReviewsSection() {
   const [reviews, setReviews] = useState([]);
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -40,6 +91,8 @@ export default function HomeReviewsSection() {
 
   const [selectedReview, setSelectedReview] = useState(null);
   const [carouselIndex, setCarouselIndex] = useState(0);
+  const [reviewImageShape, setReviewImageShape] = useState("landscape");
+  const [previewImage, setPreviewImage] = useState(null);
 
   const [form, setForm] = useState({
     customer_name: "",
@@ -85,8 +138,12 @@ export default function HomeReviewsSection() {
     return reviews.slice(start, start + PAGE_SIZE);
   }, [reviews, currentPage]);
 
-  const selectedImages = selectedReview?.images || [];
-  const selectedImage = selectedImages[carouselIndex];
+  const selectedImages = useMemo(
+    () => getReviewImageList(selectedReview),
+    [selectedReview],
+  );
+
+  const selectedImage = selectedImages[carouselIndex] || selectedImages[0];
 
   function updateField(field, value) {
     setForm((current) => ({
@@ -135,7 +192,28 @@ export default function HomeReviewsSection() {
   function closeReview() {
     setSelectedReview(null);
     setCarouselIndex(0);
+    setReviewImageShape("landscape");
+    setPreviewImage(null);
   }
+
+  useEffect(() => {
+    if (!selectedReview) return undefined;
+
+    setCarouselIndex(0);
+    setReviewImageShape("landscape");
+
+    return undefined;
+  }, [selectedReview]);
+
+  useEffect(() => {
+    if (!selectedReview || selectedImages.length <= 1) return undefined;
+
+    const interval = window.setInterval(() => {
+      setCarouselIndex((current) => (current + 1) % selectedImages.length);
+    }, 4200);
+
+    return () => window.clearInterval(interval);
+  }, [selectedReview, selectedImages.length]);
 
   function nextImage() {
     if (!selectedImages.length) return;
@@ -270,6 +348,25 @@ export default function HomeReviewsSection() {
         </div>
       )}
 
+      {previewImage && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/90 px-4 backdrop-blur-xl">
+          <button
+            type="button"
+            onClick={() => setPreviewImage(null)}
+            className="absolute right-5 top-5 rounded-full border border-white/15 bg-white/10 p-3 text-white transition hover:bg-white/20"
+            aria-label="Close image preview"
+          >
+            <X size={22} />
+          </button>
+
+          <img
+            src={previewImage.image_url}
+            alt={previewImage.caption || selectedReview?.customer_name || "Review image"}
+            className="max-h-[86vh] max-w-[94vw] rounded-[2rem] object-contain shadow-2xl"
+          />
+        </div>
+      )}
+
       {selectedReview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm">
           <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[2rem] border border-white/10 bg-[#12091f] p-5 shadow-2xl sm:p-6">
@@ -294,20 +391,46 @@ export default function HomeReviewsSection() {
             </div>
 
             {selectedImages.length > 0 && (
-              <div className="mb-5 overflow-hidden rounded-[1.5rem] border border-white/10 sm:rounded-[2rem]">
-                <div className="relative h-[230px] sm:h-[320px] md:h-[380px]">
+              <div className="mb-5 rounded-[1.5rem] border border-white/10 bg-black/25 p-3 sm:rounded-[2rem]">
+                <div
+                  className={`relative overflow-hidden rounded-[1.25rem] sm:rounded-[1.7rem] ${getReviewFrameClass(
+                    reviewImageShape,
+                  )}`}
+                >
                   <img
+                    key={selectedImage?.image_url}
                     src={selectedImage?.image_url}
-                    alt={selectedReview.customer_name}
-                    className="h-full w-full object-cover"
+                    alt={selectedImage?.caption || selectedReview.customer_name}
+                    onLoad={(event) => {
+                      const imageElement = event.currentTarget;
+                      setReviewImageShape(
+                        getImageShape(
+                          imageElement.naturalWidth,
+                          imageElement.naturalHeight,
+                        ),
+                      );
+                    }}
+                    className="absolute inset-0 h-full w-full object-cover transition duration-700 hover:scale-105"
                   />
+
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/20" />
+
+                  <button
+                    type="button"
+                    onClick={() => setPreviewImage(selectedImage)}
+                    className="absolute right-3 top-3 rounded-full border border-white/15 bg-black/50 p-3 text-white backdrop-blur-xl transition hover:bg-white hover:text-black"
+                    aria-label="Open review image preview"
+                  >
+                    <Expand size={18} />
+                  </button>
 
                   {selectedImages.length > 1 && (
                     <>
                       <button
                         type="button"
                         onClick={previousImage}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-3 text-white"
+                        className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full border border-white/15 bg-black/60 p-3 text-white backdrop-blur-xl transition hover:bg-white hover:text-black"
+                        aria-label="Previous review image"
                       >
                         <ChevronLeft size={20} />
                       </button>
@@ -315,27 +438,54 @@ export default function HomeReviewsSection() {
                       <button
                         type="button"
                         onClick={nextImage}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-3 text-white"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full border border-white/15 bg-black/60 p-3 text-white backdrop-blur-xl transition hover:bg-white hover:text-black"
+                        aria-label="Next review image"
                       >
                         <ChevronRight size={20} />
                       </button>
+
+                      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/45 px-4 py-2 backdrop-blur-xl">
+                        {selectedImages.map((image, index) => (
+                          <button
+                            key={image.image_url}
+                            type="button"
+                            onClick={() => setCarouselIndex(index)}
+                            className={`h-2.5 rounded-full transition-all ${
+                              index === carouselIndex
+                                ? "w-8 bg-white"
+                                : "w-2.5 bg-white/40 hover:bg-white/70"
+                            }`}
+                            aria-label={`Go to review image ${index + 1}`}
+                          />
+                        ))}
+                      </div>
+
+                      <p className="absolute bottom-3 right-3 rounded-full border border-white/10 bg-black/45 px-3 py-1 text-xs font-bold text-white/80 backdrop-blur-xl">
+                        {carouselIndex + 1}/{selectedImages.length}
+                      </p>
                     </>
                   )}
                 </div>
 
                 {selectedImages.length > 1 && (
-                  <div className="flex justify-center gap-2 bg-black/30 p-3">
+                  <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
                     {selectedImages.map((image, index) => (
                       <button
-                        key={image.id || image.image_url}
+                        key={image.image_url}
                         type="button"
                         onClick={() => setCarouselIndex(index)}
-                        className={`h-2.5 w-2.5 rounded-full ${
+                        className={`relative h-16 w-20 shrink-0 overflow-hidden rounded-xl border transition sm:h-20 sm:w-28 ${
                           index === carouselIndex
-                            ? "bg-pink-300"
-                            : "bg-white/25"
+                            ? "border-pink-300 ring-2 ring-pink-300/40"
+                            : "border-white/10 opacity-70 hover:opacity-100"
                         }`}
-                      />
+                      >
+                        <img
+                          src={image.image_url}
+                          alt={image.caption || `${selectedReview.customer_name} ${index + 1}`}
+                          className="h-full w-full object-cover"
+                        />
+                      </button>
                     ))}
                   </div>
                 )}

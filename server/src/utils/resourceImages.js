@@ -4,7 +4,7 @@ import {
   makeId,
   now,
   putItem,
-  scanAll,
+  queryByIndex,
 } from "../config/db.js";
 
 export function normalizeImages(images = []) {
@@ -27,12 +27,24 @@ export function normalizeImages(images = []) {
     .filter((image) => image.image_url);
 }
 
-export async function getResourceImages({ table, foreignKey, resourceId }) {
-  const rows = await scanAll(table);
+const RESOURCE_CREATED_AT_INDEX = "resource-created_at-index";
 
-  return rows
-    .filter((image) => String(image[foreignKey]) === String(resourceId))
-    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+export async function getResourceImages({ table, foreignKey, resourceId }) {
+  if (!table || !foreignKey || !resourceId) return [];
+
+  const rows = await queryByIndex(table, {
+    IndexName: RESOURCE_CREATED_AT_INDEX,
+    KeyConditionExpression: "#resourceId = :resourceId",
+    ExpressionAttributeNames: {
+      "#resourceId": foreignKey,
+    },
+    ExpressionAttributeValues: {
+      ":resourceId": String(resourceId),
+    },
+    ScanIndexForward: false,
+  });
+  
+  return rows;
 }
 
 export async function replaceResourceImages({

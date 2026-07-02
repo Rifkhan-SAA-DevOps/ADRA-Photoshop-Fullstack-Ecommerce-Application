@@ -2,6 +2,7 @@ const DEFAULT_TARGET_SIZE = 350 * 1024; // 350 KB
 const DEFAULT_MAX_SIZE = 650 * 1024; // 650 KB
 const DEFAULT_MAX_WIDTH = 1400;
 const DEFAULT_MAX_HEIGHT = 1400;
+const DEFAULT_MIN_LONGEST_SIDE = 480;
 
 function getImageFileFromItem(image) {
   return image?.file || image?.rawFile || image?.imageFile || image?.newFile || null;
@@ -117,8 +118,11 @@ export async function compressImageFile(
     maxBytes = DEFAULT_MAX_SIZE,
     maxWidth = DEFAULT_MAX_WIDTH,
     maxHeight = DEFAULT_MAX_HEIGHT,
+    minLongestSide = DEFAULT_MIN_LONGEST_SIDE,
     startQuality = 0.78,
     minQuality = 0.45,
+    emergencyMinQuality = 0.18,
+    resizeStep = 0.85,
   } = {},
 ) {
   if (!(file instanceof File)) {
@@ -138,21 +142,49 @@ export async function compressImageFile(
     maxHeight,
   );
 
-  let canvas = drawImageToCanvas(image, width, height);
-  let quality = startQuality;
-  let blob = await canvasToBlob(canvas, "image/webp", quality);
-
-  while (blob.size > targetBytes && quality > minQuality) {
-    quality = Math.max(minQuality, quality - 0.08);
-    blob = await canvasToBlob(canvas, "image/webp", quality);
+  async function renderAtQuality(quality) {
+    const canvas = drawImageToCanvas(image, width, height);
+    return canvasToBlob(canvas, "image/webp", quality);
   }
 
-  while (blob.size > maxBytes && width > 700 && height > 700) {
-    width = Math.round(width * 0.85);
-    height = Math.round(height * 0.85);
+  async function compressByQuality(byteLimit) {
+    let quality = startQuality;
+    let currentBlob = await renderAtQuality(quality);
 
-    canvas = drawImageToCanvas(image, width, height);
-    blob = await canvasToBlob(canvas, "image/webp", minQuality);
+    while (currentBlob.size > byteLimit && quality > minQuality) {
+      quality = Math.max(minQuality, quality - 0.08);
+      currentBlob = await renderAtQuality(quality);
+    }
+
+    return currentBlob;
+  }
+
+  let blob = await compressByQuality(targetBytes);
+
+  while (blob.size > maxBytes) {
+    const longestSide = Math.max(width, height);
+
+    if (longestSide <= minLongestSide) {
+      break;
+    }
+
+    const nextLongestSide = Math.max(
+      minLongestSide,
+      Math.round(longestSide * resizeStep),
+    );
+    const ratio = nextLongestSide / longestSide;
+
+    width = Math.max(1, Math.round(width * ratio));
+    height = Math.max(1, Math.round(height * ratio));
+
+    blob = await compressByQuality(maxBytes);
+  }
+
+  let emergencyQuality = minQuality;
+
+  while (blob.size > maxBytes && emergencyQuality > emergencyMinQuality) {
+    emergencyQuality = Math.max(emergencyMinQuality, emergencyQuality - 0.05);
+    blob = await renderAtQuality(emergencyQuality);
   }
 
   const cleanName = file.name.replace(/\.[^.]+$/, "");

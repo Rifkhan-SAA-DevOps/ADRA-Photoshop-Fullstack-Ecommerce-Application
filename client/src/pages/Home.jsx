@@ -7,6 +7,8 @@ import {
   BadgeCheck,
   Calendar,
   Camera,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   MapPin,
   Play,
@@ -668,6 +670,259 @@ function EventCardWrapper({ canBookEvent, event, children }) {
     </div>
   );
 }
+
+function getEventImageList(event) {
+  const imageMap = new Map();
+
+  const addImage = (
+    image,
+    fallbackAlt = event?.title || "ADRA event image",
+  ) => {
+    if (!image) return;
+
+    const imageUrl =
+      typeof image === "string"
+        ? image
+        : image.image_url || image.url || image.src || image.cover_image;
+
+    if (!imageUrl || imageMap.has(imageUrl)) return;
+
+    imageMap.set(imageUrl, {
+      src: imageUrl,
+      alt:
+        typeof image === "string"
+          ? fallbackAlt
+          : image.alt || image.caption || fallbackAlt,
+    });
+  };
+
+  addImage(event?.cover_image, event?.title);
+
+  const possibleImageGroups = [
+    event?.images,
+    event?.event_images,
+    event?.gallery,
+    event?.gallery_images,
+  ];
+
+  possibleImageGroups.forEach((group) => {
+    if (Array.isArray(group)) {
+      group.forEach((image) => addImage(image, event?.title));
+    }
+  });
+
+  return Array.from(imageMap.values());
+}
+
+function getImageShape(ratio) {
+  if (!ratio) return "landscape";
+  if (ratio < 0.85) return "portrait";
+  if (ratio > 1.25) return "landscape";
+  return "square";
+}
+
+function UpcomingEventHeroCard({ event, countdown, displayDate }) {
+  const eventImages = useMemo(() => getEventImageList(event), [event]);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [slideDirection, setSlideDirection] = useState(1);
+  const [imageRatios, setImageRatios] = useState({});
+
+  const safeImages = eventImages.length
+    ? eventImages
+    : [
+        {
+          src: event.cover_image,
+          alt: event.title,
+        },
+      ].filter((image) => image.src);
+
+  const activeImage = safeImages[activeImageIndex % safeImages.length];
+  const activeRatio = imageRatios[activeImageIndex];
+  const imageShape = getImageShape(activeRatio);
+  const eventPath = `/events/${event.slug || event.id}`;
+
+  const gridClass =
+    imageShape === "portrait"
+      ? "lg:grid-cols-[0.78fr_1.22fr]"
+      : imageShape === "square"
+        ? "lg:grid-cols-[0.95fr_1.05fr]"
+        : "lg:grid-cols-[1.08fr_0.92fr]";
+
+  const imageBoxClass =
+    imageShape === "portrait"
+      ? "h-[34rem] sm:h-[38rem] lg:h-[36rem]"
+      : imageShape === "square"
+        ? "h-80 sm:h-[26rem] lg:h-[32rem]"
+        : "h-72 sm:h-80 lg:h-[30rem]";
+
+  const goToImage = (nextIndex, direction = 1) => {
+    if (safeImages.length <= 1) return;
+
+    setSlideDirection(direction);
+    setActiveImageIndex((nextIndex + safeImages.length) % safeImages.length);
+  };
+
+  const goNext = () => goToImage(activeImageIndex + 1, 1);
+  const goPrevious = () => goToImage(activeImageIndex - 1, -1);
+
+  useEffect(() => {
+    setActiveImageIndex(0);
+    setSlideDirection(1);
+    setImageRatios({});
+  }, [event?.id, event?.slug]);
+
+  useEffect(() => {
+    if (safeImages.length <= 1) return undefined;
+
+    const timer = window.setInterval(() => {
+      setSlideDirection(1);
+      setActiveImageIndex((current) => (current + 1) % safeImages.length);
+    }, 4200);
+
+    return () => window.clearInterval(timer);
+  }, [safeImages.length]);
+
+  return (
+    <div
+      className={`relative grid items-stretch overflow-hidden rounded-[2.5rem] border border-white/10 bg-gradient-to-br from-pink-500/20 via-white/[0.06] to-violet-500/20 shadow-2xl transition-all duration-500 ${gridClass}`}
+    >
+      <div
+        className={`relative overflow-hidden bg-black/45 transition-all duration-500 ${imageBoxClass}`}
+      >
+        <Link
+          to={eventPath}
+          aria-label={`View ${event.title}`}
+          className="group/image absolute inset-0 block"
+        >
+          <AnimatePresence initial={false} custom={slideDirection} mode="sync">
+            <motion.img
+              key={`${activeImage?.src || "event-image"}-${activeImageIndex}`}
+              custom={slideDirection}
+              initial={{
+                x: slideDirection > 0 ? "100%" : "-100%",
+                opacity: 0.85,
+              }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: slideDirection > 0 ? "-100%" : "100%", opacity: 0.85 }}
+              transition={{ duration: 0.65, ease: [0.25, 1, 0.35, 1] }}
+              src={activeImage?.src}
+              alt={activeImage?.alt || event.title}
+              onLoad={(event) => {
+                const image = event.currentTarget;
+                const ratio =
+                  image.naturalWidth && image.naturalHeight
+                    ? image.naturalWidth / image.naturalHeight
+                    : 1.4;
+
+                setImageRatios((current) => ({
+                  ...current,
+                  [activeImageIndex]: ratio,
+                }));
+              }}
+              className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover/image:scale-110"
+            />
+          </AnimatePresence>
+        </Link>
+
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/20 via-transparent to-black/35" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-36 bg-gradient-to-t from-black/65 to-transparent" />
+
+        {safeImages.length > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={goPrevious}
+              aria-label="Previous event image"
+              className="absolute left-4 top-1/2 z-20 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-black/55 text-white shadow-2xl backdrop-blur-xl transition hover:scale-105 hover:bg-white hover:text-black"
+            >
+              <ChevronLeft size={22} />
+            </button>
+
+            <button
+              type="button"
+              onClick={goNext}
+              aria-label="Next event image"
+              className="absolute right-4 top-1/2 z-20 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-black/55 text-white shadow-2xl backdrop-blur-xl transition hover:scale-105 hover:bg-white hover:text-black"
+            >
+              <ChevronRight size={22} />
+            </button>
+
+            <div className="absolute bottom-5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/55 px-3 py-2 backdrop-blur-xl">
+              {safeImages.map((image, index) => (
+                <button
+                  key={`${image.src}-${index}`}
+                  type="button"
+                  onClick={() =>
+                    goToImage(index, index > activeImageIndex ? 1 : -1)
+                  }
+                  aria-label={`Show event image ${index + 1}`}
+                  className={`h-2.5 rounded-full transition-all ${
+                    index === activeImageIndex
+                      ? "w-7 bg-white"
+                      : "w-2.5 bg-white/35 hover:bg-white/70"
+                  }`}
+                />
+              ))}
+            </div>
+
+            <div className="absolute right-5 top-5 z-20 rounded-full border border-white/10 bg-black/55 px-3 py-1.5 text-xs font-black text-white/85 backdrop-blur-xl">
+              {activeImageIndex + 1} / {safeImages.length}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="p-7 md:p-10">
+        <p className="mb-4 inline-flex items-center gap-2 rounded-full bg-pink-500/20 px-4 py-2 text-sm font-bold text-pink-100">
+          <Calendar size={16} /> {displayDate.toLocaleDateString()}{" "}
+          {displayDate.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </p>
+
+        <h3 className="text-3xl font-black md:text-5xl">{event.title}</h3>
+
+        <p className="mt-5 flex items-center gap-2 text-white/60">
+          <MapPin size={17} /> {event.location}
+        </p>
+
+        <p className="mt-5 max-w-2xl text-sm leading-7 text-white/65">
+          {event.promotional_message || event.description}
+        </p>
+
+        <div className="mt-8 grid grid-cols-4 gap-3">
+          {[
+            ["Days", countdown.days],
+            ["Hours", countdown.hours],
+            ["Minutes", countdown.minutes],
+            ["Seconds", countdown.seconds],
+          ].map(([label, value]) => (
+            <div
+              key={label}
+              className="rounded-2xl border border-white/10 bg-black/30 p-4 text-center backdrop-blur-xl"
+            >
+              <p className="text-2xl font-black md:text-3xl">
+                {String(value).padStart(2, "0")}
+              </p>
+
+              <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/45">
+                {label}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <Link
+          to={eventPath}
+          className="mt-8 inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 font-black text-black transition hover:bg-pink-200"
+        >
+          Book this event <ArrowRight size={17} />
+        </Link>
+      </div>
+    </div>
+  );
+}
 function UpcomingEventsSection({ events }) {
   const [now, setNow] = useState(new Date());
   const eventRailRef = useRef(null);
@@ -768,66 +1023,11 @@ function UpcomingEventsSection({ events }) {
         </div>
 
         {futureEvent && (
-          <Link
-            to={`/events/${futureEvent.slug}`}
-            className="group relative grid items-stretch overflow-hidden rounded-[2.5rem] border border-white/10 bg-gradient-to-br from-pink-500/20 via-white/[0.06] to-violet-500/20 shadow-2xl lg:grid-cols-[0.9fr_1.1fr]"
-          >
-            <div className="relative h-64 overflow-hidden sm:h-72 lg:h-auto lg:min-h-0 lg:self-stretch">
-              <img
-                src={futureEvent.cover_image}
-                alt={futureEvent.title}
-                className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-110"
-              />
-            </div>
-
-            <div className="p-7 md:p-10">
-              <p className="mb-4 inline-flex items-center gap-2 rounded-full bg-pink-500/20 px-4 py-2 text-sm font-bold text-pink-100">
-                <Calendar size={16} /> {displayDate.toLocaleDateString()}{" "}
-                {displayDate.toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </p>
-
-              <h3 className="text-3xl font-black md:text-5xl">
-                {futureEvent.title}
-              </h3>
-
-              <p className="mt-5 flex items-center gap-2 text-white/60">
-                <MapPin size={17} /> {futureEvent.location}
-              </p>
-
-              <p className="mt-5 max-w-2xl text-sm leading-7 text-white/65">
-                {futureEvent.promotional_message || futureEvent.description}
-              </p>
-
-              <div className="mt-8 grid grid-cols-4 gap-3">
-                {[
-                  ["Days", countdown.days],
-                  ["Hours", countdown.hours],
-                  ["Minutes", countdown.minutes],
-                  ["Seconds", countdown.seconds],
-                ].map(([label, value]) => (
-                  <div
-                    key={label}
-                    className="rounded-2xl border border-white/10 bg-black/30 p-4 text-center backdrop-blur-xl"
-                  >
-                    <p className="text-2xl font-black md:text-3xl">
-                      {String(value).padStart(2, "0")}
-                    </p>
-
-                    <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/45">
-                      {label}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
-              <span className="mt-8 inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 font-black text-black transition group-hover:bg-pink-200">
-                Book this event <ArrowRight size={17} />
-              </span>
-            </div>
-          </Link>
+          <UpcomingEventHeroCard
+            event={futureEvent}
+            countdown={countdown}
+            displayDate={displayDate}
+          />
         )}
 
         <div
@@ -866,6 +1066,8 @@ export default function Home() {
       api.get("/events"),
       api.get("/hero-image-grid"),
     ]).then((results) => {
+
+      
       if (results[0].status === "fulfilled") setServices(results[0].value.data);
       if (results[1].status === "fulfilled") setProducts(results[1].value.data);
       if (results[2].status === "fulfilled") setEvents(results[2].value.data);
@@ -874,6 +1076,7 @@ export default function Home() {
       }
     });
   }, []);
+  
 
   useEffect(() => {
     heroImageSets.flat().forEach((image) => {
@@ -890,10 +1093,6 @@ export default function Home() {
     }, 5200);
 
     return () => clearInterval(timer);
-  }, [heroImageSets.length]);
-
-  useEffect(() => {
-    setHeroSetIndex(0);
   }, [heroImageSets.length]);
 
   const serviceRailItems = useMemo(() => {
@@ -969,7 +1168,10 @@ export default function Home() {
               <Clock className="text-violet-300" />
               <p className="mt-2 text-sm font-bold">Fast Booking</p>
             </div>
-            <HeroImageGrid imageSetIndex={heroSetIndex} imageSets={heroImageSets} />
+            <HeroImageGrid
+              imageSetIndex={heroSetIndex}
+              imageSets={heroImageSets}
+            />
           </motion.div>
         </div>
       </section>
@@ -991,6 +1193,7 @@ export default function Home() {
         </div>
       </section>
 
+      {/* events */}
       <UpcomingEventsSection events={events} />
 
       {/* services */}

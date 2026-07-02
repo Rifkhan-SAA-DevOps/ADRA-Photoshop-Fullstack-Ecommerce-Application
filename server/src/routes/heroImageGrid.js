@@ -23,7 +23,11 @@ const router = express.Router();
 
 function sortByOrder(items = []) {
   return [...items].sort((a, b) => {
-    return Number(a.sort_order || 0) - Number(b.sort_order || 0);
+    const orderDiff = Number(a.sort_order || 0) - Number(b.sort_order || 0);
+
+    if (orderDiff !== 0) return orderDiff;
+
+    return new Date(a.created_at || 0) - new Date(b.created_at || 0);
   });
 }
 
@@ -31,14 +35,23 @@ function normalizeStatus(status) {
   return status === "inactive" ? "inactive" : "active";
 }
 
-// PUBLIC: Home page hero image grid
-router.get("/", async (req, res, next) => {
+function normalizeHeroImage(item = {}) {
+  return {
+    ...item,
+    alt: item.alt || "ADRA photography hero image",
+    sort_order: Number(item.sort_order || 0),
+    status: normalizeStatus(item.status),
+  };
+}
+
+// PUBLIC: Home page reads only active hero image grid images
+router.get("/", async (_req, res, next) => {
   try {
     const images = await scanAll(TABLES.heroImageGrid);
 
-    const activeImages = images.filter((image) => {
-      return image.status === "active";
-    });
+    const activeImages = images
+      .map(normalizeHeroImage)
+      .filter((image) => image.status === "active" && image.image_url);
 
     res.json(sortByOrder(activeImages));
   } catch (error) {
@@ -46,37 +59,36 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// ADMIN: Get all hero grid images
-router.get("/admin", requireAdmin, async (req, res, next) => {
+// ADMIN: Read all hero image grid images
+router.get("/admin", requireAdmin, async (_req, res, next) => {
   try {
     const images = await scanAll(TABLES.heroImageGrid);
-
-    res.json(sortByOrder(images));
+    res.json(sortByOrder(images.map(normalizeHeroImage)));
   } catch (error) {
     next(error);
   }
 });
 
-// ADMIN: Upload one or many hero grid images
+// ADMIN: Upload one or many hero image grid images
 router.post(
   "/",
   requireAdmin,
   multipartUpload.any(),
   async (req, res, next) => {
     let uploadedImages = [];
+    const createdIds = [];
 
     try {
       const newImageFiles = getFiles(req, "new_images");
 
       if (!newImageFiles.length) {
         return res.status(400).json({
-          message: "Please upload at least one hero grid image.",
+          message: "Please upload at least one hero image.",
         });
       }
 
       const existingImages = await scanAll(TABLES.heroImageGrid);
-      const nextSortOrder = existingImages.length + 1;
-
+      const baseSortOrder = Number(req.body.sort_order || existingImages.length + 1);
       const newImageCaptions = parseJsonField(req.body.new_image_captions, []);
 
       uploadedImages = await uploadNewImagesToS3(
@@ -86,42 +98,52 @@ router.post(
       );
 
       const createdAt = now();
+      const status = normalizeStatus(req.body.status);
 
-      const createdItems = await Promise.all(
-        uploadedImages.map(async (image, index) => {
-          const id = makeId("hero");
+      const createdImages = [];
 
-          const item = {
-            id,
-            image_url: image.image_url,
-            alt:
-              image.caption ||
-              req.body.alt ||
-              `ADRA hero image ${nextSortOrder + index}`,
-            sort_order: Number(req.body.sort_order || nextSortOrder + index),
-            status: normalizeStatus(req.body.status),
-            created_at: createdAt,
-            updated_at: createdAt,
-          };
+      for (const [index, uploadedImage] of uploadedImages.entries()) {
+        const id = makeId("hero");
+        createdIds.push(id);
 
-          await putItem(TABLES.heroImageGrid, item);
+        const item = {
+          id,
+          image_url: uploadedImage.image_url,
+          alt:
+            uploadedImage.caption ||
+            newImageCaptions[index] ||
+            `ADRA hero image ${baseSortOrder + index}`,
+          sort_order: baseSortOrder + index,
+          status,
+          created_at: createdAt,
+          updated_at: createdAt,
+        };
 
-          return item;
-        }),
-      );
+        await putItem(TABLES.heroImageGrid, item);
+        createdImages.push(item);
+      }
 
       res.status(201).json({
-        message: "Hero image grid image uploaded.",
-        images: createdItems,
+        message: "Hero image grid images uploaded.",
+        images: createdImages,
       });
     } catch (error) {
       await cleanupUploadedImages(uploadedImages);
+
+      for (const id of createdIds) {
+        try {
+          await deleteItem(TABLES.heroImageGrid, id);
+        } catch (deleteError) {
+          console.error("Failed to rollback hero image DB item:", deleteError.message);
+        }
+      }
+
       next(error);
     }
   },
 );
 
-// ADMIN: Update image details or replace image
+// ADMIN: Update image details and optionally replace image
 router.put(
   "/:id",
   requireAdmin,
@@ -139,13 +161,14 @@ router.put(
       }
 
       const newImageFiles = getFiles(req, "new_images");
+      const newImageCaptions = parseJsonField(req.body.new_image_captions, []);
 
       let finalImageUrl = existingImage.image_url;
 
       if (newImageFiles.length > 0) {
         uploadedImages = await uploadNewImagesToS3(
           [newImageFiles[0]],
-          [req.body.alt || existingImage.alt || ""],
+          newImageCaptions,
           "hero-image-grid",
         );
 
@@ -154,7 +177,7 @@ router.put(
 
       const updatedImage = await updateItem(TABLES.heroImageGrid, req.params.id, {
         image_url: finalImageUrl,
-        alt: req.body.alt ?? existingImage.alt ?? "",
+        alt: req.body.alt ?? existingImage.alt ?? "ADRA photography hero image",
         sort_order:
           req.body.sort_order !== undefined
             ? Number(req.body.sort_order)
@@ -162,7 +185,7 @@ router.put(
         status:
           req.body.status !== undefined
             ? normalizeStatus(req.body.status)
-            : existingImage.status || "active",
+            : normalizeStatus(existingImage.status),
         updated_at: now(),
       });
 
@@ -173,11 +196,11 @@ router.put(
       ) {
         try {
           await deleteS3FileByUrl(existingImage.image_url);
-        } catch (error) {
+        } catch (deleteError) {
           console.error(
-            "Failed to delete old hero grid image:",
+            "Failed to delete old hero image:",
             existingImage.image_url,
-            error.message,
+            deleteError.message,
           );
         }
       }
@@ -193,7 +216,7 @@ router.put(
   },
 );
 
-// ADMIN: Delete hero grid image
+// ADMIN: Delete hero image grid image
 router.delete("/:id", requireAdmin, async (req, res, next) => {
   try {
     const existingImage = await getItem(TABLES.heroImageGrid, req.params.id);
@@ -207,11 +230,11 @@ router.delete("/:id", requireAdmin, async (req, res, next) => {
     if (existingImage.image_url) {
       try {
         await deleteS3FileByUrl(existingImage.image_url);
-      } catch (error) {
+      } catch (deleteError) {
         console.error(
-          "Failed to delete S3 hero grid image:",
+          "Failed to delete S3 hero image:",
           existingImage.image_url,
-          error.message,
+          deleteError.message,
         );
       }
     }

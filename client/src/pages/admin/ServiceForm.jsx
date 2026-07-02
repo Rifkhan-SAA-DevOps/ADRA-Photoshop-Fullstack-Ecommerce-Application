@@ -5,6 +5,12 @@ import { Save, X } from "lucide-react";
 import api from "../../lib/api.js";
 import MultiImageInput from "../../components/MultiImageInput.jsx";
 import { appendImagesToFormData } from "../../lib/buildResourceFormData.js";
+import {
+  compressImagesForUpload,
+  formatFileSize,
+  getTotalUploadSize,
+  getUploadFilesFromImages,
+} from "../../lib/imageCompression.js";
 
 const emptyService = {
   title: "",
@@ -31,6 +37,10 @@ const SERVICE_CATEGORIES = [
   "Software Work",
   "Other",
 ];
+
+const SERVICE_IMAGE_TARGET_BYTES = 180 * 1024; // Aim around 180 KB
+const SERVICE_IMAGE_MAX_BYTES = 200 * 1024; // Hard limit: 200 KB per image
+const SERVICE_TOTAL_UPLOAD_LIMIT = 2 * 1024 * 1024; // 2 MB total safety limit
 
 function normalizeExistingImages(serviceItem) {
   const serviceImages = Array.isArray(serviceItem.images)
@@ -115,6 +125,57 @@ export default function ServiceForm() {
     setIsSaving(true);
 
     try {
+      const newUploadFiles = getUploadFilesFromImages(images);
+
+      if (newUploadFiles.length > 8) {
+        setMessage("Please upload maximum 8 service images at once.");
+        setIsSaving(false);
+        return;
+      }
+
+      const compressedImages = await compressImagesForUpload(images, {
+        targetBytes: SERVICE_IMAGE_TARGET_BYTES,
+        maxBytes: SERVICE_IMAGE_MAX_BYTES,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        minLongestSide: 480,
+        startQuality: 0.72,
+        minQuality: 0.28,
+        emergencyMinQuality: 0.18,
+        resizeStep: 0.82,
+      });
+
+      const oversizedFiles = getUploadFilesFromImages(compressedImages).filter(
+        (file) => file.size > SERVICE_IMAGE_MAX_BYTES,
+      );
+
+      if (oversizedFiles.length) {
+        setMessage(
+          `Some images could not be compressed below 200 KB: ${oversizedFiles
+            .map((file) => `${file.name} (${formatFileSize(file.size)})`)
+            .join(", ")}. Please choose smaller images.`,
+        );
+        setIsSaving(false);
+        return;
+      }
+
+      const totalUploadSize = getTotalUploadSize(compressedImages);
+
+      if (totalUploadSize > SERVICE_TOTAL_UPLOAD_LIMIT) {
+        setMessage(
+          `Images are still too large after compression. Current total size: ${formatFileSize(
+            totalUploadSize,
+          )}. Please upload fewer images.`,
+        );
+        setIsSaving(false);
+        return;
+      }
+
+      const compressedCoverImage = coverImage
+        ? compressedImages.find((image) => image.id === coverImage.id) ||
+          coverImage
+        : null;
+
       const formData = new FormData();
 
       formData.append("title", form.title);
@@ -125,7 +186,7 @@ export default function ServiceForm() {
       formData.append("is_featured", String(Boolean(form.is_featured)));
       formData.append("status", form.status || "active");
 
-      appendImagesToFormData(formData, images, coverImage);
+      appendImagesToFormData(formData, compressedImages, compressedCoverImage);
 
       if (isEdit) {
         await api.put(`/services/${id}`, formData);
@@ -151,8 +212,8 @@ export default function ServiceForm() {
         </h1>
 
         <p className="mt-3 text-white/55">
-          Service images upload to S3 only after clicking{" "}
-          {isEdit ? "Update Service" : "Create Service"}.
+          Service images are compressed below 200 KB before upload, then saved
+          to S3 only after clicking {isEdit ? "Update Service" : "Create Service"}.
         </p>
       </div>
 

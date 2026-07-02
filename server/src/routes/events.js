@@ -1,5 +1,5 @@
 import express from "express";
-
+import { notifyAdmin } from "../utils/notify.js";
 import {
   TABLES,
   deleteItem,
@@ -12,7 +12,6 @@ import {
 } from "../config/db.js";
 import { requireAdmin } from "../middleware/auth.js";
 import { slugify } from "../utils/slugify.js";
-import { notifyAdmin } from "../utils/notify.js";
 import {
   getResourceImages,
   normalizeImages,
@@ -20,42 +19,84 @@ import {
 } from "../utils/resourceImages.js";
 import { deleteS3FileByUrl } from "../utils/s3Files.js";
 import {
-  deleteUnusedS3Urls,
-  syncResourceImages,
-} from "../utils/resourceImageSync.js";
-const router = express.Router();
-
-import {
   cleanupUploadedImages,
   getFiles,
   multipartUpload,
   parseJsonField,
   uploadNewImagesToS3,
 } from "../utils/s3ImageUpload.js";
+import { deleteUnusedS3Urls } from "../utils/resourceImageSync.js";
 
-function getDateTime(value) {
-  if (!value) return 0;
+const router = express.Router();
 
-  return new Date(String(value).replace(" ", "T")).getTime();
+function getEventTime(eventOrDate) {
+  const dateValue =
+    typeof eventOrDate === "string" ? eventOrDate : eventOrDate?.event_date;
+
+  if (!dateValue) return 0;
+
+  const time = new Date(String(dateValue).replace(" ", "T")).getTime();
+
+  return Number.isFinite(time) ? time : 0;
 }
 
-function sortEventsAsc(items = []) {
+function sortEvents(items = []) {
   return [...items].sort((a, b) => {
-    return getDateTime(a.event_date) - getDateTime(b.event_date);
+    const aTime = getEventTime(a);
+    const bTime = getEventTime(b);
+
+    if (aTime && bTime) return aTime - bTime;
+    if (aTime) return -1;
+    if (bTime) return 1;
+
+    return new Date(b.created_at || 0) - new Date(a.created_at || 0);
   });
+}
+
+function normalizeEventDate(value) {
+  if (!value) return "";
+  return String(value).replace("T", " ");
+}
+
+function normalizeStatus(status) {
+  const cleanStatus = String(status || "").trim().toLowerCase();
+
+  if (["upcoming", "completed", "cancelled"].includes(cleanStatus)) {
+    return cleanStatus;
+  }
+
+  return "upcoming";
 }
 
 async function findEventByIdOrSlug(idOrSlug) {
   const eventById = await getItem(TABLES.events, idOrSlug);
 
   if (eventById) return eventById;
-
   const events = await scanAll(TABLES.events);
 
   return (
     events.find((event) => event.slug === idOrSlug) ||
     events.find((event) => String(event.id) === String(idOrSlug)) ||
     null
+  );
+}
+
+async function attachImagesToEvents(events = []) {
+  if (!events.length) return [];
+
+  return Promise.all(
+    events.map(async (event) => {
+      const images = await getResourceImages({
+        table: TABLES.eventImages,
+        foreignKey: "event_id",
+        resourceId: event.id,
+      });
+
+      return {
+        ...event,
+        images: normalizeImages(images),
+      };
+    }),
   );
 }
 
@@ -66,31 +107,33 @@ router.get("/", async (req, res, next) => {
     let events = await scanAll(TABLES.events);
 
     if (!adminView) {
-      events = events.filter((event) => event.status === "upcoming");
+      events = events.filter((event) => event.status !== "cancelled");
     }
 
-    res.json(sortEventsAsc(events));
+    const eventsWithImages = await attachImagesToEvents(events);
+  
+    res.json(sortEvents(eventsWithImages));
   } catch (error) {
     next(error);
   }
 });
 
 router.get("/:idOrSlug", async (req, res, next) => {
-  try {
-    const key = req.params.idOrSlug;
 
-    const event = await findEventByIdOrSlug(key);
+  
+  try {
+    const event = await findEventByIdOrSlug(req.params.idOrSlug);
 
     if (!event) {
       return res.status(404).json({ message: "Event not found." });
     }
-
+    
     const images = await getResourceImages({
       table: TABLES.eventImages,
       foreignKey: "event_id",
       resourceId: event.id,
     });
-
+    
     res.json({
       ...event,
       images,
@@ -113,17 +156,19 @@ router.post(
         category,
         event_date,
         location,
-        description,
         promotional_message,
+        description,
         cover_image,
         cover_new_index,
         status,
       } = req.body;
 
-      if (!title || !event_date) {
-        return res
-          .status(400)
-          .json({ message: "Title and event date are required." });
+      if (!title) {
+        return res.status(400).json({ message: "Event title is required." });
+      }
+
+      if (!event_date) {
+        return res.status(400).json({ message: "Event date is required." });
       }
 
       const existingImages = parseJsonField(req.body.existing_images, []);
@@ -139,7 +184,6 @@ router.post(
       const cleanImages = normalizeImages([...existingImages, ...uploadedImages]);
 
       const coverNewIndex = Number(cover_new_index);
-
       const finalCoverImage =
         Number.isInteger(coverNewIndex) && uploadedImages[coverNewIndex]
           ? uploadedImages[coverNewIndex].image_url
@@ -149,7 +193,7 @@ router.post(
       const baseSlug = slugify(title);
       const slug = `${baseSlug}-${Date.now().toString().slice(-5)}`;
       const createdAt = now();
-      const finalStatus = status || "upcoming";
+      const finalStatus = normalizeStatus(status);
       const finalCategory = category || "";
 
       const event = {
@@ -158,10 +202,10 @@ router.post(
         slug,
         category: finalCategory,
         category_status: `${finalCategory || "General"}#${finalStatus}`,
-        event_date,
+        event_date: normalizeEventDate(event_date),
         location: location || "",
-        description: description || "",
         promotional_message: promotional_message || "",
+        description: description || "",
         cover_image: finalCoverImage,
         status: finalStatus,
         created_at: createdAt,
@@ -210,8 +254,8 @@ router.put(
         category,
         event_date,
         location,
-        description,
         promotional_message,
+        description,
         cover_image,
         cover_new_index,
         status,
@@ -237,27 +281,36 @@ router.put(
         "events",
       );
 
-      const cleanImages = normalizeImages([...existingImages, ...uploadedImages]);
+      const cleanImages = normalizeImages([
+        ...existingImages,
+        ...uploadedImages,
+      ]);
 
       const coverNewIndex = Number(cover_new_index);
-
       const finalCoverImage =
         Number.isInteger(coverNewIndex) && uploadedImages[coverNewIndex]
           ? uploadedImages[coverNewIndex].image_url
           : cover_image || cleanImages[0]?.image_url || "";
 
-      const finalStatus = status ?? existingEvent.status ?? "upcoming";
+      const finalStatus =
+        status !== undefined
+          ? normalizeStatus(status)
+          : existingEvent.status || "upcoming";
+
       const finalCategory = category ?? existingEvent.category ?? "";
 
       const updatedEvent = await updateItem(TABLES.events, req.params.id, {
         title: title ?? existingEvent.title,
         category: finalCategory,
         category_status: `${finalCategory || "General"}#${finalStatus}`,
-        event_date: event_date ?? existingEvent.event_date,
+        event_date:
+          event_date !== undefined
+            ? normalizeEventDate(event_date)
+            : existingEvent.event_date,
         location: location ?? existingEvent.location ?? "",
-        description: description ?? existingEvent.description ?? "",
         promotional_message:
           promotional_message ?? existingEvent.promotional_message ?? "",
+        description: description ?? existingEvent.description ?? "",
         cover_image: finalCoverImage,
         status: finalStatus,
         updated_at: now(),
@@ -339,28 +392,78 @@ router.delete("/:id", requireAdmin, async (req, res, next) => {
 
 router.post("/:id/bookings", async (req, res, next) => {
   try {
-    const { customer_name, email, phone, service_needed, message } = req.body;
+    const { customer_name, phone, email, service_needed, message } = req.body;
 
-    if (!customer_name || !phone) {
-      return res
-        .status(400)
-        .json({ message: "Name and phone number are required." });
+    const cleanName = String(customer_name || "").trim();
+    const cleanPhone = String(phone || "").replace(/\s+/g, "");
+    const cleanEmail = String(email || "").trim();
+    const cleanServiceNeeded = String(service_needed || "").trim();
+    const cleanMessage = String(message || "").trim();
+
+    const errors = {};
+
+    if (!cleanName) {
+      errors.customer_name = "Please enter your name.";
+    }
+
+    if (!cleanPhone) {
+      errors.phone = "Please enter your phone number.";
+    } else if (!/^[0-9+]{9,15}$/.test(cleanPhone)) {
+      errors.phone = "Please enter a valid phone number.";
+    }
+
+    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      errors.email = "Please enter a valid email address.";
+    }
+
+    if (!cleanServiceNeeded) {
+      errors.service_needed = "Please enter the service you need.";
     }
 
     const event = await findEventByIdOrSlug(req.params.id);
 
-    const id = makeId("booking");
+    if (!event) {
+      errors.event = "This event is no longer available.";
+    }
+
+    if (event) {
+      const eventTime = getEventTime(event);
+
+      if (!eventTime || eventTime <= Date.now()) {
+        errors.event = "Booking is closed because this event date has already passed.";
+      }
+
+      if (event.status === "cancelled") {
+        errors.event = "Booking is closed because this event is cancelled.";
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      return res.status(400).json({
+        message: "Please correct the highlighted fields.",
+        errors,
+      });
+    }
+
     const createdAt = now();
+    const id = makeId("booking");
 
     const booking = {
       id,
-      event_id: event?.id || req.params.id,
-      event_title: event?.title || "",
-      customer_name,
-      email: email || "",
-      phone,
-      service_needed: service_needed || "Event photography",
-      message: message || "",
+      type: "event_booking",
+
+      event_id: event.id,
+      event_title: event.title,
+      event_slug: event.slug,
+      event_date: event.event_date,
+      event_location: event.location || "",
+
+      customer_name: cleanName,
+      phone: cleanPhone,
+      email: cleanEmail,
+      service_needed: cleanServiceNeeded,
+      message: cleanMessage,
+
       status: "new",
       created_at: createdAt,
       updated_at: createdAt,
@@ -369,17 +472,20 @@ router.post("/:id/bookings", async (req, res, next) => {
     await putItem(TABLES.bookings, booking);
 
     const notification = await notifyAdmin("event booking", {
-      customer_name,
-      email,
-      phone,
-      service_needed,
-      message,
-      event_title: event?.title || "",
+      customer_name: cleanName,
+      phone: cleanPhone,
+      email: cleanEmail,
+      event_title: event.title,
+      event_date: event.event_date,
+      event_location: event.location || "",
+      service_needed: cleanServiceNeeded,
+      message: cleanMessage,
     });
 
     res.status(201).json({
       id,
-      message: "Booking request sent successfully.",
+      message:
+        "Your event booking request has been sent to the admin successfully. We will contact you soon.",
       notification,
     });
   } catch (error) {

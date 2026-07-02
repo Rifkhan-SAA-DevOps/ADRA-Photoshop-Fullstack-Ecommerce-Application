@@ -4,19 +4,41 @@ import { CalendarDays, Filter, Plus, Search } from "lucide-react";
 import api from "../../lib/api.js";
 import AdminResourceTable from "./AdminResourceTable.jsx";
 
+const EVENT_CATEGORIES = [
+  "Wedding",
+  "Convocation",
+  "Birthday",
+  "School",
+  "Business",
+  "Family",
+  "Friends",
+  "Studio",
+  "Other",
+];
+
 export default function ManageEvents() {
   const [items, setItems] = useState([]);
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
 
   async function loadItems() {
     const res = await api.get("/events?admin=true");
-    setItems(res.data || []);
+    setItems(Array.isArray(res.data) ? res.data : []);
   }
 
   useEffect(() => {
     loadItems().catch(() => {});
   }, []);
+
+  const categories = useMemo(() => {
+    return [
+      ...new Set([
+        ...EVENT_CATEGORIES,
+        ...items.map((item) => item.category).filter(Boolean),
+      ]),
+    ];
+  }, [items]);
 
   const filteredItems = useMemo(() => {
     let list = [...items];
@@ -26,7 +48,9 @@ export default function ManageEvents() {
       list = list.filter(
         (item) =>
           item.title?.toLowerCase().includes(keyword) ||
+          item.category?.toLowerCase().includes(keyword) ||
           item.location?.toLowerCase().includes(keyword) ||
+          item.promotional_message?.toLowerCase().includes(keyword) ||
           item.description?.toLowerCase().includes(keyword),
       );
     }
@@ -35,8 +59,12 @@ export default function ManageEvents() {
       list = list.filter((item) => item.status === statusFilter);
     }
 
+    if (categoryFilter !== "all") {
+      list = list.filter((item) => item.category === categoryFilter);
+    }
+
     return list;
-  }, [items, searchText, statusFilter]);
+  }, [items, searchText, statusFilter, categoryFilter]);
 
   async function deleteItem(id) {
     if (!confirm("Delete this event?")) return;
@@ -53,6 +81,10 @@ export default function ManageEvents() {
               <CalendarDays size={16} /> Event management
             </p>
             <h1 className="text-4xl font-black">Manage Events</h1>
+            <p className="mt-3 text-white/55">
+              Manage event packages, convocation shoots, locations, dates,
+              cover images, and event galleries.
+            </p>
           </div>
 
           <Link to="/admin/events/new" className="btn-primary">
@@ -67,26 +99,49 @@ export default function ManageEvents() {
           <h2 className="text-xl font-black">Filter events</h2>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 lg:grid-cols-[1fr_0.8fr_0.8fr]">
           <label className="flex items-center gap-3 rounded-full border border-white/10 bg-black/25 px-4 py-3">
             <Search size={16} className="text-pink-300" />
             <input
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Search event..."
+              placeholder="Search event, location, category..."
               className="w-full bg-transparent text-sm font-bold text-white outline-none placeholder:text-white/35"
             />
           </label>
+
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="rounded-full border border-white/10 bg-black/25 px-4 py-3 text-sm font-bold text-white outline-none"
+          >
+            <option value="all" className="bg-black">
+              All categories
+            </option>
+            {categories.map((category) => (
+              <option key={category} value={category} className="bg-black">
+                {category}
+              </option>
+            ))}
+          </select>
 
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="rounded-full border border-white/10 bg-black/25 px-4 py-3 text-sm font-bold text-white outline-none"
           >
-            <option value="all" className="bg-black">All status</option>
-            <option value="upcoming" className="bg-black">Upcoming</option>
-            <option value="completed" className="bg-black">Completed</option>
-            <option value="cancelled" className="bg-black">Cancelled</option>
+            <option value="all" className="bg-black">
+              All status
+            </option>
+            <option value="upcoming" className="bg-black">
+              Upcoming
+            </option>
+            <option value="completed" className="bg-black">
+              Completed
+            </option>
+            <option value="cancelled" className="bg-black">
+              Cancelled
+            </option>
           </select>
         </div>
       </div>
@@ -94,10 +149,11 @@ export default function ManageEvents() {
       <AdminResourceTable
         items={filteredItems}
         type="events"
+        showCategory
         getTitle={(item) => item.title}
         getSubtitle={(item) => item.promotional_message || item.description || "-"}
         getMeta={(item) =>
-          item.event_date ? new Date(item.event_date).toLocaleDateString() : "-"
+          item.event_date ? new Date(String(item.event_date).replace(" ", "T")).toLocaleDateString() : "-"
         }
         onDelete={deleteItem}
       />
